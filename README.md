@@ -30,7 +30,7 @@ conn.connect(function(err) {
 });
 ````
 
-## Usage Adwanced way
+## Usage Advanced way
 ```js
 var FTPClient = require('comlog-ftp');
 
