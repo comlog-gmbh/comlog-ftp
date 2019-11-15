@@ -258,7 +258,7 @@ function FTP(settings) {
 					_this.DataSocket = _this.createSocket(host, port);
 					_this.DataSocket.setTimeout(_this.timeout);
 					_this.DataSocket.once("close", function() {
-						_this.DataSocket.destroy();
+						if (_this.DataSocket) _this.DataSocket.destroy();
 						delete _this.DataSocket;
 					});
 					_this.DataSocket.once('connect', function (data) {
@@ -417,7 +417,10 @@ function FTP(settings) {
 			cb_once(e);
 			readStream.destroy();
 		});
+		var readable = false;
 		readStream.on('readable', function () {
+			if (readable) return;
+			readable = true;
 			_this.getDataSocket(function (serr, psock) {
 				if (psock) {
 					psock.setEncoding(_this.encoding);
