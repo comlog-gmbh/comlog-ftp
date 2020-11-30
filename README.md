@@ -13,7 +13,7 @@ $ npm install --save comlog-ftp
 ```js
 var FTPClient = require('comlog-ftp');
 
-var conn = FTPClient({
+var conn = new FTPClient({
     host: 'localhost', // Default localhost
     port: 21, // Default 12
     user: 'username', // Default anonymous
@@ -34,7 +34,7 @@ conn.connect(function(err) {
 ```js
 var FTPClient = require('comlog-ftp');
 
-var conn = FTPClient({
+var conn = new FTPClient({
     host: 'localhost', // Default localhost
     port: 21, // Default 12
     user: 'username', // Default anonymous
@@ -81,8 +81,8 @@ conn.connect();
  - raw( command, [args], callback ) void
  - feat( callback ) void
  - list( callback ) void
- - get( removeFilePath, [localFilePath], callback ) void
- - put( localFilePath, [removeFilePath], callback ) void
+ - get( remoteFilePath, [localFilePath], callback ) void
+ - put( localFilePath, [remoteFilePath], callback ) void
  - cwd( remotePath, callback ) void
  - pwd( callback ) void
  - rename( remoteFromPath, remoteToPath, callback) void
