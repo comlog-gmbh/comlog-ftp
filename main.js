@@ -45,6 +45,7 @@ function FTP(settings) {
 	this.active = false;
 	this.timeout = 10 * 60 * 1000;
 	this.encoding = 'binary';
+	this.transferEncoding = null;
 	this.type = 'I';
 	this.Socket = null;
 	this.debug = false;
@@ -365,7 +366,7 @@ function FTP(settings) {
 		var cb_once = function (err, sock) { if (cb) { cb(err, sock); cb = null; } };
 		this.getDataSocket(function (serr, psock) {
 			if (psock) {
-				psock.setEncoding(_this.encoding);
+				if (_this.transferEncoding) psock.setEncoding(_this.transferEncoding);
 
 				_this.raw('RETR',src, function (res) {
 					if ((['150', '125']).indexOf(res.substr(0, 3)) == -1) {
@@ -375,7 +376,12 @@ function FTP(settings) {
 						cb_once(null, psock);
 					}
 					else {
-						var writeStream = fs.createWriteStream(dst, {encoding: _this.encoding});
+						if (_this.transferEncoding) {
+							var writeStream = fs.createWriteStream(dst, {encoding: _this.transferEncoding});
+						}
+						else {
+							var writeStream = fs.createWriteStream(dst);
+						}
 
 						psock.on('error', function (err) {
 							cb_once(err);
@@ -411,7 +417,14 @@ function FTP(settings) {
 		var cb_once = function (err, sock) { if (cb) { cb(err, sock); cb = null; } };
 		var readStream;
 		if (src instanceof stream.Readable) readStream = src;
-		else readStream = fs.createReadStream(src);
+		else {
+			if (_this.transferEncoding) {
+				readStream = fs.createReadStream(src, {encoding: _this.transferEncoding});
+			}
+			else {
+				readStream = fs.createReadStream(src);
+			}
+		}
 
 		readStream.on('error', function (e) {
 			cb_once(e);
@@ -423,7 +436,9 @@ function FTP(settings) {
 			readable = true;
 			_this.getDataSocket(function (serr, psock) {
 				if (psock) {
-					psock.setEncoding(_this.encoding);
+					if (_this.transferEncoding) {
+						psock.setEncoding(_this.encoding);
+					}
 
 					psock.on('error', function (err) {
 						readStream.close();
