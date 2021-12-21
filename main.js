@@ -416,7 +416,9 @@ function FTP(settings) {
 	this.put = function (src, dst, cb) {
 		var cb_once = function (err, sock) { if (cb) { cb(err, sock); cb = null; } };
 		var readStream;
-		if (src instanceof stream.Readable) readStream = src;
+		if (src instanceof stream.Readable) {
+			readStream = src;
+		}
 		else {
 			if (_this.transferEncoding) {
 				readStream = fs.createReadStream(src, {encoding: _this.transferEncoding});
@@ -426,48 +428,52 @@ function FTP(settings) {
 			}
 		}
 
+		var error = null;
 		readStream.on('error', function (e) {
+			error = e;
 			cb_once(e);
 			readStream.destroy();
 		});
-		var readable = false;
-		readStream.on('readable', function () {
-			if (readable) return cb_once(null);
-			readable = true;
-			_this.getDataSocket(function (serr, psock) {
-				if (psock) {
-					if (_this.transferEncoding) {
-						psock.setEncoding(_this.encoding);
-					}
 
-					psock.on('error', function (err) {
+		_this.getDataSocket(function (serr, psock) {
+			if (psock && !error) {
+				if (_this.transferEncoding) {
+					psock.setEncoding(_this.encoding);
+				}
+
+				psock.on('error', function (err) {
+					readStream.close();
+					cb_once(err);
+				});
+
+				_this.raw('STOR',dst, function (res) {
+					//console.info('STOR '+dst);
+					if ((['125', '150']).indexOf(res.substr(0, 3)) == -1) {
+						//console.error('Error '+res);
 						readStream.close();
-						cb_once(err);
-					});
-
-					psock.on('pipe', function (rs) {
-						this.write(rs.read());
-					});
-
-					psock.on('close', function () {
+						psock.destroy();
+						cb_once(new Error(res));
+					}
+					else {
+						//console.info('Piping...');
 						_this.once('data', function (res) {
 							cb_once((res.substr(0, 3) != '226' ? new Error(res) : null), res);
-						})
-					});
-
-					_this.raw('STOR',dst, function (res) {
-						if ((['125', '150']).indexOf(res.substr(0, 3)) == -1) {
-							readStream.close();
+						});
+						readStream.on('data', function (data) {
+							psock.write(data);
+						});
+						readStream.on('end', function () {
+							psock.end();
 							psock.destroy();
-							cb_once(new Error(res));
-						}
-						else {
-							readStream.pipe(psock);
-						}
-					});
-				}
-				else cb_once(serr);
-			});
+						});
+						//readStream.pipe(psock);
+					}
+				});
+			}
+			else {
+				readStream.close();
+				cb_once(serr || error);
+			}
 		});
 	};
 
