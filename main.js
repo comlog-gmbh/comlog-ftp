@@ -432,7 +432,7 @@ function FTP(settings) {
 		});
 		var readable = false;
 		readStream.on('readable', function () {
-			if (readable) return;
+			if (readable) return cb_once(null);
 			readable = true;
 			_this.getDataSocket(function (serr, psock) {
 				if (psock) {
