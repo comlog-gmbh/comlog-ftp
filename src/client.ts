@@ -16,7 +16,7 @@ export class FTP extends net.Socket {
 	active = true;
 	type = 'I';
 	encoding = 'binary';
-	debug = true;
+	debug = false;
 	resultTime = 10000;
 	transferTimeout = this.resultTime;
 	transferEncoding = null;

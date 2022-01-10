@@ -1,11 +1,17 @@
 {
 	"name": "comlog-ftp",
-	"version": "2.0.1",
+	"version": "2.0.4",
 	"description": "FTP Client",
 	"main": "dist/client",
 	"scripts": {
 		"start": "tsc && node dist/client.js",
-		"test": "tsc && node test/test.js"
+		"test": "tsc && node test/test.js",
+		"clean": "rimraf dist",
+		"lint": "eslint \"./src/**/*.ts\"",
+		"lint-fix": "eslint --fix \"./src/**/*.ts\"",
+		"dev": "npm run clean && tsc --watch",
+		"tdd": "mocha --watch",
+		"buildOnly": "tsc"
 	},
 	"keywords": [
 		"FTP",
@@ -16,6 +22,9 @@
 	"license": "ISC",
 	"dependencies": {
 		"parse-listing": "^1.1.3"
+	},
+	"engines": {
+		"node": ">=8.0.0"
 	},
 	"repository": {
 		"type": "git",
