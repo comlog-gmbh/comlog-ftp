@@ -11,7 +11,7 @@ const PASV_REGEXP = /([-\d]+,[-\d]+,[-\d]+,[-\d]+),([-\d]+),([-\d]+)/;
 /**
  * @property {null|module:net.Server} activeServer
  */
-export class FTP extends net.Socket {
+export class Client extends net.Socket {
 	lastMessage = null;
 	active = true;
 	type = 'I';
