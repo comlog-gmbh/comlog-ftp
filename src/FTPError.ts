@@ -35,7 +35,7 @@ export class FTPError extends Error {
 			else code = null;
 		}
 
-		super(message);
+		if (message) this.message = message;
 		if (code) this.code = code;
 	}
 
