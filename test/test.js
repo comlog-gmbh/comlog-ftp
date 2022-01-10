@@ -1,4 +1,4 @@
-const {FTP} = require('../dist/client');
+const {FTP} = require('../dist/client').Client;
 
 (async function() {
 	var test = new FTP();

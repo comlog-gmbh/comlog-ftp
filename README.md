@@ -11,68 +11,67 @@ $ npm install --save comlog-ftp
 ## Usage Simple way
 
 ```js
-var FTPClient = require('comlog-ftp');
+const FTP = require('../dist/client').Client;
 
-var conn = FTPClient({
-    host: 'localhost', // Default localhost
-    port: 21, // Default 12
-    user: 'username', // Default anonymous
-    password: 'password' // Default anonymous@
-});
+(async function() {
+	var conn = new Client();
 
-conn.connect(function(err) {
-  if (err) return console.error(err);
-  
-  conn.get('/some_filename.txt', 'c:\\some_filename.txt', function(err) {
-     if (err) return console.error(err);
-     console.info('Download Success!');
-  });
-});
+	await conn.connectAsync(21, "localhost");
+	console.info('connected!');
+	await conn.login('anonymous', 'anonymous@')
+	console.info('logged in!');
+	await conn.pasv();
+
+	var res = await conn.list();
+	console.info(res);
+
+	await conn.quit();
+})();
 ````
 
 ## Usage Adwanced way
 ```js
-var FTPClient = require('comlog-ftp');
+const FTP = require('../dist/client').Client;
 
-var conn = FTPClient({
-    host: 'localhost', // Default localhost
-    port: 21, // Default 12
-    user: 'username', // Default anonymous
-    password: 'password' // Default anonymous@
-});
+(async function() {
+	var conn = new Client();
+	await conn.connectAsync(21, "localhost");
 
-conn.on('error', function(err) {
-  console.error(err);
-});
+	conn.on('error', function(err) {
+		console.error(err);
+	});
 
-// Optional custom data handling
-conn.on('data', function(data) {
-	// custom socket data handling
-});
+    // Optional custom data handling
+	conn.on('data', function(data) {
+		// custom socket data handling
+	});
 
-// Optional custom on connect handling
-conn.on('connect', function(data) {
-	// socket connected
-});
+	// Optional custom code 220 handling (all ftp codes can be used)
+	this.on('220', function (chunk) {
+		this.write('USER ' + this.user, function(){});
+	});
 
-// Optional custom code 220 handling (all ftp codes can be used)
-this.on('220', function (chunk) {
-    this.write('USER ' + this.user, function(){});
-});
-
-conn.on('ready', function() {
-    conn.get('/some_filename.txt', 'c:\\some_filename.txt', function(err) {
-       if (err) return console.error(err);
-       console.info('Download Success!');
-    });
-    // OR
-    conn.raw('ALLO', function(response) {
-        console.info(response);
-    })
-});
-
-// Open connection
-conn.connect();
+	conn.get('/some_filename.txt', 'c:\\some_filename.txt')
+        .then(function() {
+            console.info('Download Success!');
+        })
+        .catch(function (err) {
+			console.error(err);
+		})
+    ;
+	
+	// OR
+	conn.raw('ALLO')
+        .then(function(response) {
+            console.info(response);
+        })
+        .catch(function (err) {
+			console.error(err);
+		})
+    ;
+	
+	await conn.quit();
+})();
 ```
 
 ## Functions
@@ -95,17 +94,13 @@ conn.connect();
 ## Properties
  - {int} port Default: 21
  - {String} host Default: "localhost"
- - {String} user Default: "anonymous"
- - {String} password Default: "anonymous@"
- - {boolean} active Default: false
+ - {boolean} active Default: true
  - {int} timeout Default: 10 * 60 * 1000
- - {String} encoding Default: 'binary' Available: ascii,utf8,utf16le,ucs2,base64,latin1,binary,hex
  - {String} type Default: 'I'
- - {net.Socket} Socket Control channel socket. Default: null
  - {boolean} debug Default: false
 
 ## CHANGELOG
- - BUG Encoding after Download
+ - New Promise based FTP Client
 
 ## License
 
