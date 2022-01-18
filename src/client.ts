@@ -494,6 +494,7 @@ export class Client extends net.Socket {
 						_this.getResponse(0)
 							.then(function (cres) {
 								if (cres.getByCode(150)) ConnRes = cres.getByCode(150);
+								if (cres.getByCode(125)) ConnRes = cres.getByCode(125);
 								if (cres.getByCode(226)) TransferRes = cres.getByCode(226);
 								if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
 							})

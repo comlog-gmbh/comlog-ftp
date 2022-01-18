@@ -1,20 +1,20 @@
-const {FTP} = require('../dist/client').Client;
+const FTP = require('../dist/client').Client;
 
 (async function() {
-	var test = new FTP();
+	var client = new FTP();
 
-	await test.connectAsync(21, "localhost");
+	await client.connectAsync(21, "localhost");
 	console.info('connected!');
-	await test.login('anonymous', 'anonymous@')
+	await client.login('anonymous', 'anonymous@')
 	console.info('logged in!');
-	await test.pasv();
+	await client.pasv();
 
 	//await test.cwd('/in');
 	//var dir = await test.pwd();
 	//console.info('Current dir is '+dir);
 
-	var res = await test.list();
+	var res = await client.list();
 	console.info(res);
 
-	await test.quit();
+	await client.quit();
 })();
