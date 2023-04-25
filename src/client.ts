@@ -300,28 +300,39 @@ export class Client extends net.Socket {
 		var _this = this;
 		return new Promise(function(resolve, reject) {
 			if (get_data_channel) {
-				_this.raw('PASV')
-					.then(function (res) {
-						if (res.inRange(227, 229)) {
-							_this.active = false;
-							var match = (res.toString()).match(PASV_REGEXP);
-							if (match) {
-								var popts = {
-									host: match[1].split(',').join("."),
-									port: (parseInt(match[2], 10) & 255) * 256 + (parseInt(match[3], 10) & 255)
-								};
+				var _parseResponse: (res: ResponseList) => void;
 
-								if (popts.host === "127.0.0.1") popts.host = _this.host;
-								resolve(popts);
-							}
-							else {
-								reject(new Error('Parsing passive mode settings: '+res));
-							}
+				_parseResponse = function (res: ResponseList) {
+					if (res.inRange(227, 229)) {
+						_this.active = false;
+						var match = (res.toString()).match(PASV_REGEXP);
+						if (match) {
+							var popts = {
+								host: match[1].split(',').join("."),
+								port: (parseInt(match[2], 10) & 255) * 256 + (parseInt(match[3], 10) & 255)
+							};
+
+							if (popts.host === "127.0.0.1") popts.host = _this.host;
+							resolve(popts);
+						}
+						else {
+							reject(new Error('Parsing passive mode settings: '+res));
+						}
+					}
+					else {
+						if (res.inRange(250)) {
+							_this.getResponse()
+								.then(_parseResponse)
+								.catch(reject);
 						}
 						else {
 							reject(new FTPError(res));
 						}
-					})
+					}
+				};
+
+				_this.raw('PASV')
+					.then(_parseResponse)
 					.catch(reject);
 			}
 			else {
