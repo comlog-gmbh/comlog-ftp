@@ -184,11 +184,11 @@ export class Client extends EventEmitter {
 		this.socket.end(data, encoding, callback);
 	}
 
-	destroy(data?: Uint8Array | string, encoding?: string, callback?: ((err?: (Error | undefined)) => void) | undefined) {
+	destroy(error?: Error) {
 		// @ts-ignore
-		if (this.tlsSocket) this.tlsSocket.destroy(data, encoding, callback);
+		if (this.tlsSocket) this.tlsSocket.destroy(error);
 		// @ts-ignore
-		if (this.socket) this.socket.destroy(data, encoding, callback);
+		if (this.socket) this.socket.destroy(error);
 		this.tlsSocket = null;
 		//this.tlsOptions = {};
 		//this.useTLSDataChannel = false
