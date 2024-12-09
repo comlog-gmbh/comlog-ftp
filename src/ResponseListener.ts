@@ -3,7 +3,7 @@ import {Socket} from "net";
 import {TLSSocket} from "tls";
 import {Response} from "./Response";
 
-export class ResponseListner {
+export class ResponseListener {
 	public completed: boolean = false;
 	private socket: Socket | TLSSocket;
 	private resultTimeout: number = 0;

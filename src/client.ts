@@ -3,7 +3,7 @@ import tls from "tls";
 import {FTPError} from "./FTPError";
 import {Response} from "./Response";
 import {ResponseList} from "./ResponseList";
-import {ResponseListner} from "./ResponseListner";
+import {ResponseListener} from "./ResponseListener";
 import {ListEntry, parseListOutput} from "./ListParser";
 import stream from "stream";
 import fs from "fs";
@@ -179,9 +179,31 @@ export class Client extends EventEmitter {
 		});
 	}
 
-	end(data?: Uint8Array | string, encoding?: string, callback?: ((err?: (Error | undefined)) => void) | undefined) {
-		// @ts-ignore
-		this.socket.end(data, encoding, callback);
+	/**
+	 * Close socket connection
+	 * @param callback Optionaler Callback,
+	 * @returns Promise
+	 */
+	end(callback?: (err?: Error) => void): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const handleError = (err: Error) => {
+				if (callback) callback(err);
+				reject(err);
+			};
+
+			const handleClose = () => {
+				if (callback) callback();
+				resolve();
+			};
+
+			this.socket.once("error", handleError);
+			this.socket.once("close", handleClose);
+
+			this.socket.end();
+			if (this.tlsSocket) {
+				this.tlsSocket.end();
+			}
+		});
 	}
 
 	destroy(error?: Error) {
@@ -245,7 +267,7 @@ export class Client extends EventEmitter {
 
 	public getResponseListner(transferTimeout?: number) {
 		if (typeof transferTimeout == 'undefined' || transferTimeout === null) transferTimeout = this.transferTimeout;
-		return new ResponseListner(this.getSocket(), transferTimeout);
+		return new ResponseListener(this.getSocket(), transferTimeout);
 	}
 
 	private write(data: string, encoding?: string, cb?: ((err?: (Error | undefined)) => void) | undefined): boolean {

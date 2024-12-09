@@ -1,6 +1,6 @@
 # comlog-ftp [![NPM version](https://badge.fury.io/js/comlog-ftp.svg)](https://npmjs.org/package/comlog-ftp) [![Build Status](https://travis-ci.org/ar/comlog-ftp.svg?branch=master)](https://travis-ci.org/ar/comlog-ftp)
 
-> FTP Client with encoding, passive and active modes. Promises based. TLS (SSL) support for passive mode.
+FTP Client with encoding, passive and active modes. Promises based. TLS (SSL) support for passive mode.
 
 ## Installation
 
@@ -75,32 +75,54 @@ const FTP = require('../dist/client').Client;
 ```
 
 ## Functions
- - connect( callback ) void
- - write( command, [callback] ) void
- - raw( command, [args], callback ) void
- - feat( callback ) void
- - list( callback ) void
- - get( removeFilePath, [localFilePath], callback ) void
- - put( localFilePath, [removeFilePath], callback ) void
- - cwd( remotePath, callback ) void
- - pwd( callback ) void
- - rename( remoteFromPath, remoteToPath, callback) void
- - delete( remoteFilePath, callback ) void
- - mkdir( remotePath, callback ) void
- - rmdir( remoteDir, callback ) void
- - stat( callback ) void
- - destroy() void
+ - connect(port, [host], [cb]) void
+ - connectAsync(port, [host]) Promise
+ - setEncoding(encoding)
+ - enableTLS([options])
+ - getSocket(): net.Socket|tls.TLSSocket
+ - getResponseListner([transferTimeout]): ResponseListener
+ - login( user, [pass]) Promise<ResponseList>
+ - write( command, [encoding], [callback] ) boolean
+ - raw( command, [args] ) Promise<ResponseList>
+ - rawlist(dir?:string): Promise<string>
+ - openActiveSocket() Promise<net.Server>
+ - openPassiveSocket() Promise<net.Socket | tls.TLSSocket>
+ - rawTransfer(cmd: string) : Promise<Response|undefined>
+ - pasv([get_data_channel: boolean]) Promise<{host:string, port:number}>
+ - feat() Promise<Map<string, string>>
+ - list (dir?: string) : Promise<ListEntry[]>
+ - get(src : string, dst? : string | stream.Writable) : Promise<void>
+ - put(src : string | stream.Readable, dst?: string) : Promise<void>
+ - cwd (dir : string) : Promise<ResponseList>
+ - pwd () : Promise<string>
+ - rename(src : string, dst : string) : Promise<ResponseList>
+ - delete (target : string) : Promise<ResponseList>
+ - rm (target : string) : Promise<ResponseList> Alias to delete
+ - mkdir (target : string) : Promise<ResponseList>
+ - rmdir (target : string) : Promise<ResponseList>
+ - stat (): Promise<ResponseList>
+ - destroy([error]) void
+ - end([data], [encoding], [callback]) Promise<void>
+ - quit() Promise<ResponseList>
+ - on(event, listener) Instance of EventEmitter
+ - once(event, listener) Instance of EventEmitter
+ - off(event, ?listener) Instance of EventEmitter
 
 ## Properties
- - {int} port Default: 21
- - {String} host Default: "localhost"
+ - {number} port Default: 21
+ - {string} host Default: "localhost"
  - {boolean} active Default: true
- - {int} timeout Default: 10 * 60 * 1000
- - {String} type Default: 'I'
+ - {number} timeout Default: 10 * 60 * 1000
+ - {string} type Default: 'I'
  - {boolean} debug Default: false
+ - {string} encoding Default: 'binary'
 
 ## CHANGELOG
  - New Promise based FTP Client
+ - Added TLS support
+ - Compatibility (end and destroy functions)
+ - Added quit function
+ - Added EPSV Support and fallback to PASV
 
 ## License
 
