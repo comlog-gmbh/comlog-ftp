@@ -184,6 +184,16 @@ export class Client extends EventEmitter {
 		this.socket.end(data, encoding, callback);
 	}
 
+	destroy(data?: Uint8Array | string, encoding?: string, callback?: ((err?: (Error | undefined)) => void) | undefined) {
+		// @ts-ignore
+		if (this.tlsSocket) this.tlsSocket.destroy(data, encoding, callback);
+		// @ts-ignore
+		if (this.socket) this.socket.destroy(data, encoding, callback);
+		this.tlsSocket = null;
+		//this.tlsOptions = {};
+		//this.useTLSDataChannel = false
+	}
+
 	enableTLS(options: ConnectionOptions = {}): Promise<TLSSocket> {
 		const _this = this;
 		let tls_defaults: tls.ConnectionOptions = {rejectUnauthorized: false};
