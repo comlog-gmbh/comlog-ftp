@@ -1,6 +1,6 @@
 {
 	"name": "comlog-ftp",
-	"version": "3.0.0",
+	"version": "3.0.1",
 	"description": "FTP Client",
 	"main": "dist/client",
 	"scripts": {
