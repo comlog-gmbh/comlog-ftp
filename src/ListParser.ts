@@ -1,5 +1,5 @@
 export type ListEntry = {
-	type: string;
+	type: "directory"|"symlink"|"file";
 	permissions?: string;
 	owner?: string;
 	group?: string;

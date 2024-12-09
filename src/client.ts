@@ -179,6 +179,21 @@ export class Client extends EventEmitter {
 		});
 	}
 
+	end(data?: Uint8Array | string, encoding?: string, callback?: ((err?: (Error | undefined)) => void) | undefined) {
+		// @ts-ignore
+		this.socket.end(data, encoding, callback);
+	}
+
+	destroy(error?: Error) {
+		// @ts-ignore
+		if (this.tlsSocket) this.tlsSocket.destroy(error);
+		// @ts-ignore
+		if (this.socket) this.socket.destroy(error);
+		this.tlsSocket = null;
+		//this.tlsOptions = {};
+		//this.useTLSDataChannel = false
+	}
+
 	enableTLS(options: ConnectionOptions = {}): Promise<TLSSocket> {
 		const _this = this;
 		let tls_defaults: tls.ConnectionOptions = {rejectUnauthorized: false};
