@@ -1,20 +1,24 @@
 import {Response} from "./Response";
 
-export class ResponseList extends Array {
+const regex = /(?=\n\d+\s)/g;
+
+export class ResponseList extends Array<Response> {
 	/**
-	 * Create responselist
+	 * Create ResponseList
 	 * @param {string|array} data
 	 */
 	constructor(data? : any) {
 		super();
 		if (typeof data == 'string') {
-			var lines = (data+'').split("\r\n").join("\n").split("\r").join("\n").split("\n");
-			for (var i=0; i < lines.length; i++) {
+			let lines = data.split(regex).map(part => part.trim());
+
+			//let lines = (data+'').split("\r\n").join("\n").split("\r").join("\n").split("\n");
+			for (let i=0; i < lines.length; i++) {
 				if (lines[i] !== '') this.push(new Response(lines[i]));
 			}
 		}
 		else if (Array.isArray(data)) {
-			for (var i=0; i < data.length; i++) {
+			for (let i=0; i < data.length; i++) {
 				if (data[i]) this.push(new Response(data[i]));
 			}
 		}
@@ -24,9 +28,9 @@ export class ResponseList extends Array {
 	 * All response lines are success
 	 * @return {boolean}
 	 */
-	isSuccess () {
-		var success = true;
-		for (var i=0; i < this.length; i++) {
+	isSuccess (): boolean {
+		let success = true;
+		for (let i=0; i < this.length; i++) {
 			if (!this[i].isSuccess()) {
 				success = false;
 				break;
@@ -42,9 +46,9 @@ export class ResponseList extends Array {
 	 * @param to
 	 * @return {boolean}
 	 */
-	inRange (from: number, to?: number) {
-		var success = true;
-		for (var i=0; i < this.length; i++) {
+	inRange (from: number, to?: number): boolean {
+		let success = true;
+		for (let i=0; i < this.length; i++) {
 			if (!this[i].inRange(from, to)) {
 				success = false;
 				break;
@@ -58,14 +62,14 @@ export class ResponseList extends Array {
 	 * Any of lines has error
 	 * @return {boolean}
 	 */
-	isError () {
+	isError (): boolean {
 		return !this.isSuccess();
 	};
 
-	toString() {
-		var out = '';
-		for (var i=0; i < this.length; i++) {
-			out = this[i].code + ' ' + this[i].message + "\r\n";
+	toString(): string {
+		let out = '';
+		for (let i=0; i < this.length; i++) {
+			out += this[i].code + ' ' + this[i].message + "\r\n";
 		}
 		return out;
 	}
@@ -75,9 +79,9 @@ export class ResponseList extends Array {
 	 * @param {number} code
 	 * @return {boolean}
 	 */
-	codeExists(code: any) {
+	codeExists(code: any): boolean {
 		code = parseInt(code);
-		for (var i=0; i < this.length; i++) {
+		for (let i=0; i < this.length; i++) {
 			if (this[i].code === code) return true;
 		}
 
@@ -87,14 +91,14 @@ export class ResponseList extends Array {
 	/**
 	 * Get response by code
 	 * @param {number} code
-	 * @return {null|Response}
+	 * @return {Response|undefined}
 	 */
-	getByCode(code: any) {
+	getByCode(code: any): Response | undefined {
 		code = parseInt(code);
-		for (var i=0; i < this.length; i++) {
+		for (let i=0; i < this.length; i++) {
 			if (this[i].code === code) return this[i];
 		}
 
-		return null;
+		return undefined;
 	}
 }

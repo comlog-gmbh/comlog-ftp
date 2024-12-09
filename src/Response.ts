@@ -1,25 +1,20 @@
-// @ts-ignore
 export class Response {
-	code = null;
-	message = null;
+	code: number|null = null;
+	message: string|null = null;
 
 	constructor(data?: any) {
 		if (data) {
-			var code = (data+'').substr(0,3);
-			if (Number.isNaN(code)) {
-				// @ts-ignore
+			const code = (data+'').substring(0,3);
+			if (isNaN(Number(code))) {
 				this.message = "Can't parse response:" + data;
 			}
 			else {
-				// @ts-ignore
 				this.code = parseInt(code);
-				this.message = data.substr(4);
+				this.message = data.substring(4);
 			}
 		}
 		else {
-			// @ts-ignore
 			this.code = 700
-			// @ts-ignore
 			this.message = "Can't parse response:" + data;
 		}
 	}
@@ -30,7 +25,7 @@ export class Response {
 	 * @param {number} [to]
 	 * @return {boolean}
 	 */
-	inRange (from: number, to?: number) {
+	inRange (from: number, to?: number): boolean {
 		if (!to) to = from;
 		if (typeof this.code != 'number') return false;
 
@@ -41,7 +36,7 @@ export class Response {
 	 * Check is response positive
 	 * @return {boolean}
 	 */
-	isSuccess () {
+	isSuccess (): boolean {
 		return this.inRange(100, 399);
 	}
 
@@ -49,15 +44,20 @@ export class Response {
 	 * Check is response negative
 	 * @return {boolean}
 	 */
-	isError () {
+	isError (): boolean {
 		return this.inRange(400, 700);
 	}
 
-	toString () {
+	toString (): string {
 		return this.code + ' ' + this.message;
 	}
 
-	match (regexp: RegExp) {
+	// noinspection JSUnusedGlobalSymbols
+	/**
+	 * Regexp Validation
+	 * @param regexp
+	 */
+	match (regexp: RegExp): RegExpMatchArray|null {
 		return this.toString().match(regexp);
 	}
 }

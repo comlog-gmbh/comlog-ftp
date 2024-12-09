@@ -1,6 +1,6 @@
 # comlog-ftp [![NPM version](https://badge.fury.io/js/comlog-ftp.svg)](https://npmjs.org/package/comlog-ftp) [![Build Status](https://travis-ci.org/ar/comlog-ftp.svg?branch=master)](https://travis-ci.org/ar/comlog-ftp)
 
-> FTP Client with encoding support
+> FTP Client with encoding, passive and active modes. Promises based. TLS (SSL) support for passive mode.
 
 ## Installation
 

@@ -1,48 +1,58 @@
-import net from "net";
+import net, {Socket} from "net";
+import tls from "tls";
 import {FTPError} from "./FTPError";
 import {Response} from "./Response";
 import {ResponseList} from "./ResponseList";
+import {ResponseListner} from "./ResponseListner";
+import {ListEntry, parseListOutput} from "./ListParser";
 import stream from "stream";
 import fs from "fs";
 import path from "path";
-const ListingParser = require("parse-listing");
+import EventEmitter from "node:events";
+import { connect as connectTLS, ConnectionOptions, TLSSocket } from "tls"
 const PASV_REGEXP = /([-\d]+,[-\d]+,[-\d]+,[-\d]+),([-\d]+),([-\d]+)/;
+const EPSV_REGEXP = /\(([^|]*)\|([^|]*)\|([^|]*)\|(\d+)\|([^)]*)\)/;
+const socketEvents = ["connect", "data", "end", "error", "close"];
 
-/**
- * @property {null|module:net.Server} activeServer
- */
-export class Client extends net.Socket {
-	lastMessage = null;
+export class Client extends EventEmitter {
+	lastMessage: string|null = null;
 	active = true;
-	type = 'I';
+	type: string = 'I'; // I = Binary, A = ASCII
 	encoding = 'binary';
 	debug = false;
-	resultTime = 10000;
+	resultTime = 20000;
 	transferTimeout = this.resultTime;
-	transferEncoding = null;
-	host = '127.0.0.1';
-	port = 21;
-
-	defaults = {
-		host: '127.0.0.1',
-		port: 21,
-		encoding: 'binary'
-	};
+	transferEncoding: string|null = null;
+	host: string = '127.0.0.1';
+	port: number = 21;
+	socket: net.Socket;
+	tlsSocket: tls.TLSSocket|null = null;
+	tlsOptions: tls.ConnectionOptions = {};
+	useTLSDataChannel = false;
 
 	constructor(opt?: any) {
-		super(opt);
-		var _this = this;
+		super();
+		const _this = this;
+
+		this.socket = new net.Socket(opt);
+
+		// Socket events umleiten
+		for (const event of socketEvents) {
+			this.socket.on(event, (...args) => {
+				this.emit(event, ...args); // Emit the same event on the wrapper
+			});
+		}
+
 
 		// Data parser
 		this.on('data', function (chunk) {
-			if (_this.debug) console.log(chunk);
-			// @ts-ignore
-			var lines = chunk.split("\r\n").join("\n").split("\r").join('\n').split("\n");
-			for (var i=0; i < lines.length; i++) {
+			if (_this.debug) console.info("CONTROL DATA: " + chunk);
+			const lines = (chunk+'').split("\r\n").join("\n").split("\r").join('\n').split("\n");
+			for (let i=0; i < lines.length; i++) {
 				if (lines[i].trim() !== '') {
 					_this.lastMessage = lines[i];
-					var code = lines[i].substring(0,3);
-					if (!isNaN(code)) {
+					const code = lines[i].substring(0,3);
+					if (!isNaN(Number(code))) {
 						if (_this.debug) console.log('Emit '+code+' event');
 						_this.emit(code, lines[i], code);
 					}
@@ -57,93 +67,8 @@ export class Client extends net.Socket {
 	 */
 	setEncoding(encoding: string) {
 		this.encoding = encoding;
-		return super.setEncoding(encoding)
-	};
-
-	/**
-	 * Get response from control channel
-	 * @param {number|null} [resultTime] wait timeout in ms. 0 = no timeout
-	 * @return {Promise<ResponseList>}
-	 */
-	getResponse(resultTime?: number) : Promise<ResponseList> {
-		var _this = this;
-		var completed = false;
-		return new Promise(function(resolve, reject) {
-			var timer: any;
-			var err_fn = function (err: Error) {
-				if (timer) clearTimeout(timer);
-				off_fn();
-				if (!completed) {
-					completed = true;
-					reject(err);
-				}
-			};
-
-			var close_fn = function () {
-				if (timer) clearTimeout(timer);
-				off_fn();
-				if (!completed) {
-					completed = true;
-					reject(new Error('The connection was closed before the response was sent'));
-				}
-			};
-
-			var data_fn = function (chunk: string) {
-				if (timer) clearTimeout(timer);
-				off_fn();
-				if (!completed) {
-					var data = '';
-					var lines = chunk.split("\r\n");
-					for (var i=0; i < lines.length; i++) {
-						if (lines[i] !== '' && lines[i].substr(0, 3) !== '220')
-							data += lines[i]+"\r\n";
-					}
-					if (data.trim() !== '') {
-						completed = true;
-						resolve(new ResponseList(data));
-					}
-				}
-			};
-
-			var off_fn = function () {
-				_this.off('error', err_fn);
-				_this.off('close', close_fn);
-				_this.off('data', data_fn);
-			};
-
-			_this.once('error', err_fn);
-			_this.once('close', close_fn);
-			_this.on('data', data_fn);
-
-			if (typeof resultTime == 'undefined' || resultTime === null) resultTime = _this.resultTime;
-
-			if (resultTime > 0) {
-				timer = setTimeout(function () {
-					if (!completed) {
-						completed = true;
-						// @ts-ignore
-						reject(new Error('Waiting for response timeout ('+(resultTime / 1000)+'sec)'));
-					}
-				}, resultTime);
-			}
-		});
-	};
-
-	/**
-	 * Get response from control channel
-	 * @param {number|null} [resultTime] wait timeout in ms. 0 = no timeout
-	 * @return {Promise<Response>}
-	 */
-	getLastResponse (resultTime?: number) : Promise<Response> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.getResponse(resultTime)
-				.then(function (list) {
-					resolve(list.pop())
-				})
-				.catch(reject)
-			;
-		})
+		if (this.tlsSocket) this.tlsSocket.setEncoding(encoding);
+		return this.socket.setEncoding(encoding);
 	};
 
 	/**
@@ -151,16 +76,18 @@ export class Client extends net.Socket {
 	 * @param {number|string} port
 	 * @param {string} [host]
 	 * @param {function} cb
-	 * @return {FTP}
+	 * @return {this}
 	 */
-	// @ts-ignore
-	connect (port: any, host?: any, cb?: Function | null) : this {
-		var _this = this;
+	connect (port: number, host?: any, cb?: Function | null) : this {
+		const _this = this;
 		if (this.encoding) this.setEncoding(this.encoding);
 
+		this.port = port;
+		if (host) this.host = host;
+
 		if (cb) {
-			var timer: NodeJS.Timeout;
-			var err_fn = function (err: Error) {
+			let timer: NodeJS.Timeout;
+			const err_fn = function (err: Error) {
 				if (timer) clearTimeout(timer);
 				if (cb) cb(err);
 				cb = null;
@@ -168,26 +95,38 @@ export class Client extends net.Socket {
 			};
 
 			/** !-- recive wilcome message --> */
-			var cb_timeout: NodeJS.Timeout
-			var res_220: any[] = [];
-			var res_other: any[] = [];
+			let cb_timeout: NodeJS.Timeout
+			let res_220: any[] = [];
+			let res_other: any[] = [];
 
-			var data_fn = function (data: string) {
+			const data_fn = function (data: string) {
 				if (timer) clearTimeout(timer);
 				if (cb_timeout) clearTimeout(cb_timeout);
 
 				if (cb) {
-					if (data.substr(0, 3) === '220') res_220.push(data);
+					if (data.substring(0, 3) === '220') res_220.push(data);
 					else res_other.push(data);
 
-					cb_timeout = setTimeout(function () {
+					cb_timeout = setTimeout(async function () {
 						if (res_220.length > 0) {
-							// @ts-ignore
-							cb(null, res_220.join(""));
+							if (cb) {
+								//const features = await _this.feat();
+								//const supportsMLSD = features.has("MLST")
+								//this.availableListCommands = supportsMLSD ? LIST_COMMANDS_MLSD() : LIST_COMMANDS_DEFAULT()
+								await _this.raw("TYPE "+_this.type);
+								await _this.raw("STRU F");
+								if (_this.encoding.toUpperCase().indexOf('UTF') > -1 && _this.encoding.toUpperCase().indexOf('8') > -1) {
+									await _this.raw("OPTS UTF8 ON");
+								}
+
+								//if (supportsMLSD) {
+								//	await this.sendIgnoringError("OPTS MLST type;size;modify;unique;unix.mode;unix.owner;unix.group;unix.ownername;unix.groupname;") // Make sure MLSD listings include all we can parse
+								//}
+								cb(null, res_220.join(""));
+							}
 						}
 						else {
-							// @ts-ignore
-							cb(new FTPError(res_other.join("")));
+							if (cb) cb(new FTPError(res_other.join("")));
 						}
 						cb = null;
 						off_fn();
@@ -196,16 +135,14 @@ export class Client extends net.Socket {
 			}
 			/** <-- recive wilcome message --! */
 
-			var close_fn = function () {
+			const close_fn = function () {
 				if (timer) clearTimeout(timer);
-				if (cb) {
-					cb(new Error('The connection was closed before the welcome message was sent'));
-				}
+				if (cb) cb(new Error('The connection was closed before the welcome message was sent'));
 				cb = null;
 				off_fn();
 			}
 
-			var off_fn = function () {
+			const off_fn = function () {
 				_this.off('error', err_fn);
 				_this.off('data', data_fn);
 				_this.off('close', close_fn);
@@ -223,7 +160,7 @@ export class Client extends net.Socket {
 			});
 		}
 
-		super.connect(port, host);
+		this.socket.connect(port, host);
 		return _this;
 	};
 
@@ -232,14 +169,74 @@ export class Client extends net.Socket {
 	 * @param port
 	 * @param host
 	 */
-	connectAsync(port: any, host: string) {
-		var _this = this;
+	connectAsync(port: any, host: string): Promise<Socket> {
+		const _this = this;
 		return new Promise(function (resolve, reject) {
 			_this.connect(port, host, function (err: Error) {
 				if (err) reject(err);
-				resolve(_this);
+				resolve(_this.socket);
 			});
 		});
+	}
+
+	enableTLS(options: ConnectionOptions = {}): Promise<TLSSocket> {
+		const _this = this;
+		let tls_defaults: tls.ConnectionOptions = {rejectUnauthorized: false};
+		if (!net.isIPv4(_this.host) && !net.isIPv6(_this.host)) {
+			tls_defaults.servername = _this.host;
+		}
+
+		this.tlsOptions = Object.assign({}, tls_defaults, options, {socket: _this.socket});
+
+		return new Promise(async function (resolve, reject) {
+			const res = await _this.raw("AUTH TLS");
+
+			// SSL Verbindung ist erlaubt
+			if (res.codeExists(234)) {
+				_this.tlsSocket = tls.connect(_this.tlsOptions, async function () {
+					const expectCertificate = _this.tlsOptions.rejectUnauthorized !== false
+					if (expectCertificate && !_this.tlsSocket!.authorized) {
+						reject(_this.tlsSocket!.authorizationError)
+					} else {
+						// Socket events umleiten
+						for (const event of socketEvents) {
+							_this.tlsSocket!.on(event, (...args) => {
+								_this.emit(event, ...args); // Emit the same event on the wrapper
+							});
+						}
+						await _this.raw("PBSZ 0");
+						const prot_res = await _this.raw("PROT P");
+						if (prot_res.isSuccess()) {
+							_this.useTLSDataChannel = true;
+						}
+
+						resolve(_this.tlsSocket!);
+					}
+				});
+
+				_this.tlsSocket.setEncoding(_this.encoding);
+
+				_this.tlsSocket.once('error', function (err) {
+					_this.tlsSocket = null;
+					reject(err);
+				});
+			}
+		});
+	}
+
+	public getSocket() {
+		return this.tlsSocket || this.socket;
+	}
+
+	public getResponseListner(transferTimeout?: number) {
+		if (typeof transferTimeout == 'undefined' || transferTimeout === null) transferTimeout = this.transferTimeout;
+		return new ResponseListner(this.getSocket(), transferTimeout);
+	}
+
+	private write(data: string, encoding?: string, cb?: ((err?: (Error | undefined)) => void) | undefined): boolean {
+		if (this.debug) console.info("CONTROL WRITE: " + data);
+		let enc = encoding ? encoding : this.encoding;
+		return this.getSocket().write(data, enc, cb);
 	}
 
 	/**
@@ -248,9 +245,9 @@ export class Client extends net.Socket {
 	 * @return {Promise<ResponseList>}
 	 */
 	raw(data: string) : Promise<ResponseList> {
-		var _this = this;
+		const _this = this;
 		return new Promise(function(resolve, reject) {
-			_this.getResponse()
+			_this.getResponseListner().wait()
 				.then(function (res) {
 					resolve(res);
 				})
@@ -264,85 +261,112 @@ export class Client extends net.Socket {
 	 * Login on server
 	 * @param {string} user
 	 * @param {string} pass
-	 * @return {Promise<void>}
+	 * @return {Promise<ResponseList>}
 	 */
-	login(user: string, pass: string) {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('USER ' + user)
+	async login(user: string, pass: string): Promise<ResponseList> {
+		const res: ResponseList = await this.raw('USER ' + user);
+
+		if (res.codeExists(331)) {
+			const res2 = await this.raw('PASS ' + pass);
+			if (res2.codeExists(230)) {
+				return res2;
+			}
+			else {
+				throw new FTPError(res2);
+			}
+		}
+		else {
+			throw new FTPError(res);
+		}
+	};
+
+	/**
+	 *
+	 */
+	feat(): Promise<Map<string, string>> {
+		const _this = this;
+		return new Promise((resolve, reject) => {
+			const features = new Map()
+			_this.getResponseListner().waitUntil(/211 End/i)
 				.then(function (res) {
-					if (res.codeExists(331)) {
-						_this.raw('PASS ' + pass)
-							.then(function (res2) {
-								if (res2.codeExists(230)) {
-									resolve(res2);
-								}
-								else {
-									reject(new FTPError(res2))
-								}
-							})
-							.catch(reject);
-					}
-					else {
-						reject(new FTPError(res))
-					}
+					//let lines = res.toString().split("\r\n");
+					res.toString().split("\n").slice(1, -1).forEach(line => {
+						const entry = line.trim().split(" ")
+						features.set(entry[0], entry[1] || "")
+					})
+					resolve(features);
 				})
 				.catch(reject);
+
+			this.write('FEAT\r\n', this.encoding);
 		});
-	};
+	}
 
 	/**
 	 * Change to Passiv mode
 	 * @param {boolean} [get_data_channel]
 	 * @return {Promise<{host:string, port:number}>}
 	 */
-	pasv(get_data_channel?: boolean) : Promise<{host:string, port:number}> {
-		var _this = this;
-		return new Promise(function(resolve, reject) {
-			if (get_data_channel) {
-				var _parseResponse: (res: ResponseList) => void;
+	async pasv(get_data_channel?: boolean) : Promise<{host:string, port:number}> {
+		const _this = this;
+		if (get_data_channel) {
+			const _parseResponse = async function (res: ResponseList): Promise<{host:string, port:number}> {
+				if (res.inRange(227, 229)) {
+					_this.active = false;
+					const popts = {
+						host: _this.host,
+						port: 0
+					};
 
-				_parseResponse = function (res: ResponseList) {
-					if (res.inRange(227, 229)) {
-						_this.active = false;
-						var match = (res.toString()).match(PASV_REGEXP);
-						if (match) {
-							var popts = {
-								host: match[1].split(',').join("."),
-								port: (parseInt(match[2], 10) & 255) * 256 + (parseInt(match[3], 10) & 255)
-							};
-
-							if (popts.host === "127.0.0.1") popts.host = _this.host;
-							resolve(popts);
-						}
-						else {
-							reject(new Error('Parsing passive mode settings: '+res));
-						}
+					// PASV Rückgabe
+					let match = (res.toString()).match(PASV_REGEXP);
+					if (match) {
+						popts.host = match[1].split(',').join(".");
+						popts.port =  (parseInt(match[2], 10) & 255) * 256 + (parseInt(match[3], 10) & 255);
+						if (popts.host === "127.0.0.1") popts.host = _this.host;
 					}
 					else {
-						if (res.inRange(250)) {
-							_this.getResponse()
-								.then(_parseResponse)
-								.catch(reject);
+						// EPSV Rückgabe
+						match = (res.toString()).match(EPSV_REGEXP);
+						if (match) {
+							popts.port = parseInt(match[4]);
+							if (popts.host === "127.0.0.1") popts.host = _this.host;
 						}
 						else {
-							reject(new FTPError(res));
+							throw new Error('Parsing passive mode settings: '+res);
 						}
 					}
-				};
 
-				_this.raw('PASV')
-					.then(_parseResponse)
-					.catch(reject);
+					return popts;
+				}
+				else {
+					if (res.inRange(250)) {
+						const response = await _this.getResponseListner().wait();
+						return _parseResponse(response);
+					}
+					else {
+						throw new FTPError(res)
+					}
+				}
+			};
+
+			let res;
+			try {
+				res = await _parseResponse(await this.raw('EPSV'))
 			}
-			else {
-				_this.active = false;
-				resolve({
-					host: _this.host,
-					port: _this.port
-				});
+			catch (e) {
+				res = await _parseResponse(await this.raw('PASV'))
 			}
-		});
+
+			return res;
+		}
+		else {
+			_this.active = false;
+			return {
+				host: _this.host,
+				port: _this.port
+			};
+		}
 	}
 
 	/**
@@ -350,9 +374,9 @@ export class Client extends net.Socket {
 	 * @return {Promise<module:net.Server>}
 	 */
 	openActiveSocket() : Promise<net.Server> {
-		var _this = this;
+		const _this = this;
 		return new Promise(function(resolve, reject: Function) {
-			var server = net.createServer();
+			const server = net.createServer();
 
 			server.on('error', function(e){
 				if (reject) {
@@ -380,13 +404,14 @@ export class Client extends net.Socket {
 
 			server.listen(function() {
 				if (_this.debug) console.info('Active server started');
-				var address = server.address();
+				const address = server.address();
 				if (typeof address == 'object' && address !== null) {
-					var port = address.port;
-					var p1 = Math.floor(port / 256);
-					var p2 = port % 256;
+					let port = address.port;
+					let p1 = Math.floor(port / 256);
+					let p2 = port % 256;
 
-					var ip = _this.localAddress.split('.').join(',');
+					const localAddress = _this.tlsSocket && _this.tlsSocket.localAddress ? _this.tlsSocket.localAddress : _this.socket.localAddress;
+					let ip = localAddress.split('.').join(',');
 					_this.raw('PORT ' + ip + ',' + p1 + ',' + p2)
 						.then(function (res) {
 							if (res.inRange(200, 299)) {
@@ -409,45 +434,81 @@ export class Client extends net.Socket {
 
 	/**
 	 * Create and emit passive socket
-	 * @return {Promise<module:net.Socket>}
+	 * @return {Promise<net.Socket|tls.TLSSocket>}
 	 */
-	openPassiveSocket() : Promise<net.Socket> {
-		var _this = this;
-		return new Promise(function(resolve, reject) {
-			_this.pasv(true)
-				.then(function (popts) {
-					var dsock = new net.Socket();
-					if (_this.transferTimeout) dsock.setTimeout(_this.transferTimeout);
-					dsock.connect(popts.port, popts.host);
-					dsock.on('ready', function () {
-						// @ts-ignore
-						reject = null;
-						resolve(dsock);
+	openPassiveSocket(): Promise<net.Socket | tls.TLSSocket> {
+		const _this = this;
+		return new Promise(async function (resolve, reject) {
+			const popts = await _this.pasv(true);
+			if (_this.debug) console.log("Passive Verbindungsdetails:", { host: popts.host, port: popts.port });
+
+			const socket = new net.Socket();
+
+			socket.connect(popts.port, popts.host, async function () {
+				if (_this.debug) console.log("Unverschlüsselte Datenkanal-Verbindung hergestellt");
+				if (_this.useTLSDataChannel && _this.tlsSocket) {
+					const tlsSocket = tls.connect(Object.assign({}, _this.tlsOptions, {
+						socket,
+						session: _this.tlsSocket!.getSession()
+					}))
+
+					tlsSocket.on("error", (err) => {
+						if (_this.debug) console.error("TLS-Fehler (Datenkanal):", err.message);
+						tlsSocket.destroy();
+						reject(err);
 					});
-					dsock.on('error', function (err) {
-						if (reject) reject(err);
-					});
-				})
-				.catch(reject);
+
+					if (_this.transferTimeout) {
+						tlsSocket.setTimeout(_this.transferTimeout, () => {
+							reject(new Error("TLS-Datenkanal: Timeout"));
+							tlsSocket.destroy();
+						});
+					}
+
+					resolve(tlsSocket);
+				}
+				else {
+					resolve(socket);
+				}
+			});
+
+			socket.on("error", (err) => {
+				if (_this.debug) console.error("Datenkanal-Fehler:", err.message);
+				socket.destroy();
+				reject(err);
+			});
+
+			socket.on("close", () => {
+				if (_this.debug) console.log("Datenkanal-Verbindung geschlossen");
+			});
+
+			if (_this.transferTimeout) {
+				socket.setTimeout(_this.transferTimeout, () => {
+					if (_this.debug) console.error("Datenkanal: Timeout");
+					reject(new Error("Datenkanal: Timeout"));
+					socket.destroy();
+				});
+			}
 		});
 	}
+
 
 	/**
 	 * Run command and open data channel
 	 * @param {string} cmd
 	 * @return {Promise<Response>}
 	 */
-	rawTransfer(cmd: string) : Promise<Response> {
-		var _this = this;
+	rawTransfer(cmd: string) : Promise<Response|undefined> {
+		const _this = this;
 		return new Promise(function(resolve, reject) {
-			var TransferRes: Response | null = null;
-			var socketEnd = false;
+			let TransferRes: Response | undefined;
+			let socketEnd = false;
 
 			if (_this.active) {
 				_this.openActiveSocket()
 					.then(function(server) {
 						// Data connection timeout
-						var timeout = setTimeout(function () {
+						let timeout = setTimeout(function () {
 							reject(new Error('Data (Active) connection from Server timeout'));
 						}, _this.transferTimeout);
 
@@ -461,7 +522,7 @@ export class Client extends net.Socket {
 									return reject(new FTPError(res));
 								}
 								else {
-									_this.getLastResponse(0)
+									_this.getResponseListner(0).waitLast()
 										.then(function (tres) {
 											TransferRes = tres;
 											if (TransferRes && socketEnd) {
@@ -496,13 +557,18 @@ export class Client extends net.Socket {
 			else {
 				_this.openPassiveSocket()
 					.then(function (dataSocket) {
-						var ConnRes : ResponseList | Response | null = null;
+						let ConnRes : ResponseList | Response | undefined;
 						dataSocket.on('end', function () {
 							socketEnd = true;
 							if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
 						});
 
-						_this.getResponse(0)
+						dataSocket.on('end', function () {
+							socketEnd = true;
+							if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+						});
+
+						_this.getResponseListner(0).wait()
 							.then(function (cres) {
 								if (cres.getByCode(150)) ConnRes = cres.getByCode(150);
 								if (cres.getByCode(125)) ConnRes = cres.getByCode(125);
@@ -519,11 +585,14 @@ export class Client extends net.Socket {
 						_this.raw(cmd)
 							.then(function (res) {
 								if (res.isSuccess()) {
-									_this.getResponse(0)
+									_this.getResponseListner(0).wait()
 										.then(function (cres) {
 											if (cres.getByCode(150)) ConnRes = cres.getByCode(150);
 											if (cres.getByCode(226)) TransferRes = cres.getByCode(226);
-											if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+											if (ConnRes && TransferRes && socketEnd) {
+												resolve(TransferRes);
+											}
+											//else resolve(undefined);
 										})
 										.catch(function (err) {
 											reject(err);
@@ -546,19 +615,12 @@ export class Client extends net.Socket {
 
 	/**
 	 * Quit ftp
-	 * @return {Promise<string>}
+	 * @return {Promise<ResponseList>}
 	 */
-	quit() {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('QUIT')
-				.then(function (res) {
-					if (res.isSuccess()) resolve(res);
-					reject(new FTPError(res))
-				})
-				.catch(reject);
-		})
-
+	async quit(): Promise<ResponseList> {
+		const res = await this.raw('QUIT');
+		if (res.isSuccess()) return res;
+		throw new FTPError(res);
 	}
 
 	/**
@@ -566,11 +628,11 @@ export class Client extends net.Socket {
 	 * @param {string} dir
 	 * @return {Promise<string>}
 	 */
-	rawlist(dir?:string) {
-		var _this = this;
+	rawlist(dir?:string): Promise<string> {
+		const _this = this;
 		return new Promise(function(resolve, reject) {
-			var rawlist = '';
-			var error : Error | null = null;
+			let rawlist = '';
+			let error : Error | null = null;
 			if (!dir) dir = '.'
 
 			_this.once('datachannel', function (dataSocket) {
@@ -599,73 +661,58 @@ export class Client extends net.Socket {
 	 * @param {string} dir
 	 * @return {Promise<[{}]>}
 	 */
-	list (dir?: string) : Promise<[{}]> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.rawlist(dir)
-				.then(function (data) {
-					ListingParser.parseFtpEntries(data, function(parseErr: null | Error, files: any) {
-						if (parseErr) return reject(parseErr);
-						resolve(files);
-					});
-				})
-				.catch(reject);
-		});
+	async list (dir?: string) : Promise<ListEntry[]> {
+		const data = await this.rawlist(dir);
+		const parsed = parseListOutput(data);
+		return parsed;
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Upload file to Server
 	 * @param {string|module:stream.Readable} src
 	 * @param {string} [dst]
 	 * @return {Promise<void>}
 	 */
-	put(src : string | stream.Readable, dst?: string) : Promise<void> {
-		var _this = this;
-		return new Promise(function(resolve, reject) {
-			var readStream : stream.Readable;
+	async put(src : string | stream.Readable, dst?: string) : Promise<void> {
+		//const _this = this;
+		let readStream : stream.Readable;
 
-			if (src instanceof stream.Readable) {
-				readStream = src;
+		if (src instanceof stream.Readable) {
+			readStream = src;
+		}
+		else {
+			if (this.transferEncoding) {
+				readStream = fs.createReadStream(src, {encoding: this.transferEncoding});
 			}
 			else {
-				if (_this.transferEncoding) {
-					readStream = fs.createReadStream(src, {encoding: _this.transferEncoding});
-				}
-				else {
-					readStream = fs.createReadStream(src);
-				}
+				readStream = fs.createReadStream(src);
 			}
+		}
 
-			var error : Error;
-			readStream.on('error', function (err) {
+		let error : Error|null = null;
+		readStream.on('error', function (err) {
+			error = err;
+		});
+
+		this.once('datachannel', function (dataSocket) {
+			readStream.pipe(dataSocket);
+
+			dataSocket.on('error', function (err: Error) {
 				error = err;
 			});
-
-			_this.once('datachannel', function (dataSocket) {
-				readStream.pipe(dataSocket);
-
-				dataSocket.on('error', function (err: Error) {
-					error = err;
-				});
-			});
-
-			if (!dst) {
-				// TODO Test
-				// @ts-ignore
-				dst = path.basename(readStream.filename || readStream.path);
-			}
-
-			_this.rawTransfer('STOR '+dst)
-				.then(function (res) {
-					if (error) reject(error);
-					else if (res.isError()) reject(new FTPError(res));
-					else resolve();
-				})
-				.catch(function (err) {
-					reject(err);
-				})
-			;
 		});
+
+		if (!dst) {
+			// TODO Test
+			// @ts-ignore
+			dst = path.basename(readStream.filename || readStream.path);
+		}
+
+		const res = await this.rawTransfer('STOR '+dst);
+		if (error) throw error;
+		else if (res && res.isError()) throw new FTPError(res);
+		else if (!res) throw new FTPError("No response");
 	}
 
 	/**
@@ -675,9 +722,9 @@ export class Client extends net.Socket {
 	 * @return {Promise<void>}
 	 */
 	get(src : string, dst? : string | stream.Writable) : Promise<void> {
-		var _this = this;
+		const _this = this;
 		return new Promise(function(resolve, reject) {
-			var writeStream : stream.Writable;
+			let writeStream : stream.Writable;
 			if (!dst) dst = path.basename(src);
 
 			if (dst instanceof stream.Writable) {
@@ -692,7 +739,7 @@ export class Client extends net.Socket {
 				}
 			}
 
-			var error : Error;
+			let error : Error;
 			writeStream.on('error', function (err) {
 				error = err;
 			});
@@ -708,7 +755,8 @@ export class Client extends net.Socket {
 			_this.rawTransfer('RETR '+src)
 				.then(function (res) {
 					if (error) reject(error);
-					else if (res.isError()) reject(new FTPError(res));
+					else if (res && res.isError()) reject(new FTPError(res));
+					else if (!res) reject(new FTPError("No response"));
 					else resolve();
 				})
 				.catch(function (err) {
@@ -718,70 +766,52 @@ export class Client extends net.Socket {
 		});
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Change to directory
 	 * @param {string} dir
 	 * @return {Promise<ResponseList>}
 	 */
-	cwd (dir : string) : Promise<ResponseList> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('CWD '+(dir))
-				.then(function (res) {
-					if (res.isSuccess()) resolve(res);
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async cwd (dir : string) : Promise<ResponseList> {
+		const res = await this.raw('CWD '+(dir))
+		if (res.isSuccess()) return res;
+		else throw new FTPError(res);
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Get current path
 	 * @return {Promise<string>}
 	 */
-	pwd () : Promise<string> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('PWD')
-				.then(function (res) {
-					if (res.isSuccess()) {
-						var data = res.toString();
-						var start = data.indexOf('"');
-						if (start < 0) return reject(new FTPError(res));
-						var ende = data.indexOf('"', start+1);
-						if (ende < 0) return reject(new FTPError(res));
+	async pwd () : Promise<string> {
+		const res = await this.raw('PWD');
+		if (res.isSuccess()) {
+			const data = res.toString();
+			const start = data.indexOf('"');
+			if (start < 0) throw new FTPError(res);
+			const ende = data.indexOf('"', start+1);
+			if (ende < 0) throw new FTPError(res);
 
-						resolve(data.substring(start+1, ende));
-					}
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+			return data.substring(start+1, ende);
+		}
+		else throw new FTPError(res);
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Get current path
 	 * @param {string} src
 	 * @param {string} dst
 	 * @return {Promise<ResponseList>}
 	 */
-	rename(src : string, dst : string) : Promise<ResponseList> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('RNFR '+src)
-				.then(function (res) {
-					if (res.isSuccess()) {
-						_this.raw('RNTO '+dst)
-							.then(function (res) {
-								if (res.isSuccess()) resolve(res);
-								else reject(new FTPError(res))
-							})
-							.catch(reject);
-					}
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async rename(src : string, dst : string) : Promise<ResponseList> {
+		let res = await this.raw('RNFR '+src);
+		if (res.isSuccess()) {
+			res = await this.raw('RNTO '+dst);
+			if (res.isSuccess()) return res;
+			else throw new FTPError(res)
+		}
+		else throw new FTPError(res);
 	};
 
 	/**
@@ -789,116 +819,53 @@ export class Client extends net.Socket {
 	 * @param {string} target
 	 * @return {Promise<ResponseList>}
 	 */
-	delete (target : string) : Promise<ResponseList> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('DELE '+(target))
-				.then(function (res) {
-					if (res.isSuccess()) resolve(res);
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async delete (target : string) : Promise<ResponseList> {
+		const res = await this.raw('DELE '+(target));
+		if (res.isSuccess()) return res;
+		else throw new FTPError(res);
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Remove file
+	 * @see this.delete
 	 * @param {string} target
 	 * @return {Promise<ResponseList>}
 	 */
 	rm (target : string) : Promise<ResponseList> { return this.delete(target); }
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Create a directory
 	 * @param {string} target
 	 * @return {Promise<ResponseList>}
 	 */
-	mkdir (target : string) : Promise<ResponseList> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('MKD '+(target))
-				.then(function (res) {
-					if (res.isSuccess()) resolve(res);
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async mkdir (target : string) : Promise<ResponseList> {
+		const res = await this.raw('MKD '+(target));
+		if (res.isSuccess()) return res;
+		else throw new FTPError(res);
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * delete file
 	 * @param {string} target
 	 * @return {Promise<ResponseList>}
 	 */
-	rmdir (target : string) : Promise<ResponseList> {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('RMD '+(target))
-				.then(function (res) {
-					if (res.isSuccess()) resolve(res);
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async rmdir (target : string) : Promise<ResponseList> {
+		const res = await this.raw('RMD '+(target));
+		if (res.isSuccess()) return res;
+		else throw new FTPError(res);
 	};
 
+	// noinspection JSUnusedGlobalSymbols
 	/**
 	 * Get current path
 	 * @return {Promise<ResponseList>}
 	 */
-	feat () {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			var data = '';
-			var _on_data = function (chunk : string) {
-				data += chunk;
-				if (data.indexOf('211 End') > -1) {
-					_this.off('data', _on_data);
-					_this.off('error', _on_error);
-					if (resolve) {
-						let tmp = data.split("\n");
-						tmp.shift();
-						tmp.pop();
-						resolve(tmp.join("\n"));
-						// @ts-ignore
-						resolve = null;
-					}
-				}
-			};
-
-			var _on_error = function (err : Error) {
-				_this.off('data', _on_data);
-				_this.off('error', _on_error);
-
-				if (resolve) {
-					reject(err);
-					// @ts-ignore
-					resolve = null;
-				}
-			};
-
-			_this.on('data', _on_data);
-			_this.on('error', _on_error);
-
-			_this.write("FEAT\r\n");
-		});
-	};
-
-	/**
-	 * Get current path
-	 * @return {Promise<ResponseList>}
-	 */
-	stat () {
-		var _this = this;
-		return new Promise(function (resolve, reject) {
-			_this.raw('STAT')
-				.then(function (res) {
-					if (res.isSuccess()) {
-						resolve(res);
-					}
-					else reject(new FTPError(res))
-				})
-				.catch(reject);
-		});
+	async stat (): Promise<ResponseList> {
+		const res = await this.raw('STAT')
+		if (res.isSuccess()) return res;
+		else throw new FTPError(res);
 	};
 }
