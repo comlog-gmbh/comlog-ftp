@@ -1,8 +1,9 @@
 {
 	"name": "comlog-ftp",
-	"version": "3.0.5",
+	"version": "3.0.6",
 	"description": "FTP Client",
 	"main": "dist/client",
+  	"readme": "README.md",
 	"scripts": {
 		"start": "tsc && node dist/client.js",
 		"test": "tsc && node test/test.js",
