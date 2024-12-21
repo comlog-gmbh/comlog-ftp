@@ -1,1 +1,2 @@
 # comlog-ftp
+Init
