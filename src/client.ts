@@ -29,7 +29,7 @@ export class Client extends EventEmitter {
 	tlsSocket: tls.TLSSocket|null = null;
 	tlsOptions: tls.ConnectionOptions = {};
 	useTLSDataChannel = false;
-	featuers: Map<string, string>|null = null;
+	features: Map<string, string>|null = null;
 	private MLSTSend = false;
 
 	constructor(opt?: any) {
@@ -96,7 +96,7 @@ export class Client extends EventEmitter {
 				off_fn();
 			};
 
-			/** !-- recive wilcome message --> */
+			/** !-- receive welcome message --> */
 			let cb_timeout: NodeJS.Timeout
 			let res_220: any[] = [];
 			let res_other: any[] = [];
@@ -129,7 +129,7 @@ export class Client extends EventEmitter {
 					}, 1000);
 				}
 			}
-			/** <-- recive wilcome message --! */
+			/** <-- receive welcome message --! */
 
 			const close_fn = function () {
 				if (timer) clearTimeout(timer);
@@ -202,6 +202,7 @@ export class Client extends EventEmitter {
 		});
 	}
 
+	// noinspection JSUnusedGlobalSymbols
 	destroy(error?: Error) {
 		// @ts-ignore
 		if (this.tlsSocket) this.tlsSocket.destroy(error);
@@ -264,7 +265,7 @@ export class Client extends EventEmitter {
 		return this.tlsSocket || this.socket;
 	}
 
-	public getResponseListner(transferTimeout?: number) {
+	public getResponseListener(transferTimeout?: number) {
 		if (typeof transferTimeout == 'undefined' || transferTimeout === null) transferTimeout = this.transferTimeout;
 		return new ResponseListener(this.getSocket(), transferTimeout);
 	}
@@ -283,7 +284,7 @@ export class Client extends EventEmitter {
 	raw(data: string) : Promise<ResponseList> {
 		const _this = this;
 		return new Promise(function(resolve, reject) {
-			_this.getResponseListner().wait()
+			_this.getResponseListener().wait()
 				.then(function (res) {
 					resolve(res);
 				})
@@ -322,20 +323,20 @@ export class Client extends EventEmitter {
 	feat(reload: boolean = false): Promise<Map<string, string>> {
 		const _this = this;
 		return new Promise((resolve, reject) => {
-			if (_this.featuers && !reload) {
-				resolve(_this.featuers);
+			if (_this.features && !reload) {
+				resolve(_this.features);
 				return;
 			}
 
-			_this.featuers = new Map()
-			_this.getResponseListner().waitUntil(/211 End|211 no/i)
+			_this.features = new Map()
+			_this.getResponseListener().waitUntil(/211 End|211 no/i)
 				.then(function (res) {
 					//let lines = res.toString().split("\r\n");
 					res.toString().split("\n").slice(1, -1).forEach(line => {
 						const entry = line.trim().split(" ")
-						_this.featuers!.set(entry[0], entry[1] || "")
+						_this.features!.set(entry[0], entry[1] || "")
 					})
-					resolve(_this.featuers!);
+					resolve(_this.features!);
 				})
 				.catch(reject);
 
@@ -382,7 +383,7 @@ export class Client extends EventEmitter {
 				}
 				else {
 					if (res.inRange(250)) {
-						const response = await _this.getResponseListner().wait();
+						const response = await _this.getResponseListener().wait();
 						return _parseResponse(response);
 					}
 					else {
@@ -560,7 +561,7 @@ export class Client extends EventEmitter {
 									return reject(new FTPError(res));
 								}
 								else {
-									_this.getResponseListner(0).waitLast()
+									_this.getResponseListener(0).waitLast()
 										.then(function (tres) {
 											TransferRes = tres;
 											if (TransferRes && socketEnd) {
@@ -579,7 +580,7 @@ export class Client extends EventEmitter {
 
 						server.on('connection', function(dataSocket) {
 							if (timeout) clearTimeout(timeout);
-							if (_this.debug) console.info('Incomming active connection');
+							if (_this.debug) console.info('Incoming active connection');
 							dataSocket.setKeepAlive(true, 5000);
 
 							dataSocket.on('end', function () {
@@ -598,10 +599,12 @@ export class Client extends EventEmitter {
 						let ConnRes : ResponseList | Response | undefined;
 						dataSocket.on('end', function () {
 							socketEnd = true;
-							if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+							if (ConnRes && TransferRes && socketEnd) {
+								resolve(TransferRes);
+							}
 						});
 
-						_this.getResponseListner(0).waitUntil('150')
+						_this.getResponseListener(0).waitUntil('150')
 							.then(function (cres) {
 								ConnRes = cres.getByCode(150);
 							})
@@ -610,14 +613,16 @@ export class Client extends EventEmitter {
 							})
 						;
 
-						const ConnListener1 = _this.getResponseListner(0);
-						const ConnListener2 = _this.getResponseListner(0);
-						const TransferResListener = _this.getResponseListner(0);
+						const ConnListener1 = _this.getResponseListener(0);
+						const ConnListener2 = _this.getResponseListener(0);
+						const TransferResListener = _this.getResponseListener(0);
 
-						ConnListener1.waitUntil('150')
+						ConnListener1.waitUntilCode(150)
 							.then(function (cres) {
 								ConnRes = cres.getByCode(150);
-								if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+								if (ConnRes && TransferRes && socketEnd) {
+									resolve(TransferRes);
+								}
 							})
 							.catch(function (err) {
 								ConnListener1.stop();
@@ -627,10 +632,12 @@ export class Client extends EventEmitter {
 							})
 						;
 
-						ConnListener2.waitUntil('125')
+						ConnListener2.waitUntilCode(125)
 							.then(function (cres) {
 								ConnRes = cres.getByCode(125);
-								if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+								if (ConnRes && TransferRes && socketEnd) {
+									resolve(TransferRes);
+								}
 							})
 							.catch(function (err) {
 								ConnListener1.stop();
@@ -640,10 +647,12 @@ export class Client extends EventEmitter {
 							})
 						;
 
-						TransferResListener.waitUntil('226')
+						TransferResListener.waitUntilCode(226)
 							.then(function (cres) {
 								TransferRes = cres.getByCode(226);
-								if (ConnRes && TransferRes && socketEnd) resolve(TransferRes);
+								if (ConnRes && TransferRes && socketEnd) {
+									resolve(TransferRes);
+								}
 							})
 							.catch(function (err) {
 								ConnListener1.stop();
@@ -653,7 +662,7 @@ export class Client extends EventEmitter {
 							})
 						;
 
-						/*_this.getResponseListner(0).wait()
+						/*_this.getResponseListener(0).wait()
 							.then(function (cres) {
 								//if (cres.getByCode(150)) ConnRes = cres.getByCode(150);
 								if (cres.getByCode(125)) ConnRes = cres.getByCode(125);
@@ -670,7 +679,7 @@ export class Client extends EventEmitter {
 						_this.raw(cmd)
 							.then(function (res) {
 								if (res.isSuccess()) {
-									_this.getResponseListner(0).wait()
+									_this.getResponseListener(0).wait()
 										.then(function (cres) {
 											if (cres.getByCode(150)) ConnRes = cres.getByCode(150);
 											if (cres.getByCode(226)) TransferRes = cres.getByCode(226);
@@ -855,12 +864,21 @@ export class Client extends EventEmitter {
 		const _this = this;
 		return new Promise(function(resolve, reject) {
 			let writeStream : stream.Writable;
-			if (!dst) dst = path.basename(src);
+			if (!dst) {
+				dst = path.basename(src);
+			}
 
 			if (dst instanceof stream.Writable) {
 				writeStream = dst;
 			}
 			else {
+				try {
+					const stats = fs.statSync(dst);
+					if (stats.isDirectory()) {
+						dst =  path.join(dst, path.basename(src));
+					}
+				} catch (err) {}
+
 				if (_this.transferEncoding) {
 					writeStream = fs.createWriteStream(dst, {encoding: _this.transferEncoding});
 				}

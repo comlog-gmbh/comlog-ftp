@@ -5,12 +5,12 @@ import {Response} from "./Response";
 
 export class ResponseListener {
 	public completed: boolean = false;
-	private socket: Socket | TLSSocket;
-	private resultTimeout: number = 0;
-	private timer: NodeJS.Timeout|null = null;
-	private reject: ((err: Error) => void) | null = null;
-	private resolve: ((value: ResponseList) => void) | null = null;
-	private match?: string|RegExp;
+	public socket: Socket | TLSSocket;
+	public resultTimeout: number = 0;
+	public timer: NodeJS.Timeout|null = null;
+	public reject: ((err: Error) => void) | null = null;
+	public resolve: ((value: ResponseList) => void) | null = null;
+	public match?: string|RegExp;
 	public data = "";
 
 	constructor(socket: Socket | TLSSocket, resultTimeout: number = 10000) {
@@ -146,6 +146,16 @@ export class ResponseListener {
 			}
 		});
 	};
+
+	/**
+	 * Get multi-line response from control channel
+	 * @param {string|RegExp} matchEnd match end string
+	 * @return {Promise<ResponseList>}
+	 */
+	waitUntilCode(matchEnd: string|number) : Promise<ResponseList> {
+		const regex = new RegExp(`^${matchEnd} `, 'm');
+		return this.waitUntil(regex);
+	}
 
 	stop () {
 		this._off_fn();
